@@ -6,6 +6,7 @@ import time
 import logging
 from datetime import datetime
 from enum import Enum
+from threading import Lock
 
 # ---- Logging Setup ----
 logging.basicConfig(level=logging.INFO)
@@ -58,21 +59,24 @@ class MachineMonitor:
         self.cycle_count = 0
         self.last_state_change = datetime.now()
 
+        self.power_lock = Lock()
     def update_power(self, power):
-        if power is not None:
-            self.power_readings_sum += power
-            self.power_readings_count += 1
+        with self.power_lock:
+            if power is not None:
+                self.power_readings_sum += power
+                self.power_readings_count += 1
 
     def calculate_and_reset_average(self):
-        if self.power_readings_count > 0:
-            avg_power = self.power_readings_sum / self.power_readings_count
-            self.current_power = avg_power
-            self.power_readings_sum = 0
-            self.power_readings_count = 0
-            return avg_power
+        with self.power_lock:
+            if self.power_readings_count > 0:
+                avg_power = self.power_readings_sum / self.power_readings_count
+                self.current_power = avg_power
+                self.power_readings_sum = 0
+                self.power_readings_count = 0
+                return avg_power
 
-        # No new readings were recorded, DO NOT update self.power
-        return self.current_power
+            # No new readings were recorded, DO NOT update self.power
+            return self.current_power
 
     def update_door(self, is_open):
         self.door_is_open = is_open

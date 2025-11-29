@@ -7,6 +7,7 @@ import logging
 from datetime import datetime
 from enum import Enum
 
+# ---- Logging Setup ----
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -259,9 +260,12 @@ def on_message(client, userdata, msg):
         logger.debug(f"Topic: {msg.topic}, Payload: {msg.payload}")
 
 def on_disconnect(client, userdata, rc):
-    """Callback for when the client disconnects from AWS IoT Core"""
     if rc != 0:
-        logger.warning(f"⚠️ Unexpected disconnect from AWS IoT Core, code: {rc}")
+        logger.warning(f"⚠️ Unexpected disconnect, attempting reconnect...")
+        try:
+            client.reconnect()
+        except Exception as e:
+            logger.error(f"Reconnect failed: {e}")
     else:
         logger.info("🔴 Disconnected from AWS IoT Core")
 
@@ -328,6 +332,7 @@ def main():
                 publish_machine_data(client)
                 last_publish_time = current_time
             time.sleep(1)
+            
     except KeyboardInterrupt:
         logger.info("\n⏹️  Shutting down gracefully...")
         monitor_manager.save_cycle_counts()

@@ -88,12 +88,12 @@ class MachineMonitor:
         cycle_completed = False
 
         if self.state == MachineState.IDLE:
-            if self.current_power > self.current_threshold:
+            if self.current_power > self.current_threshold * 1.2:  # 20% hysteresis
                 new_state = MachineState.RUNNING
                 self.door_open_start_time = None
 
         elif self.state == MachineState.RUNNING:
-            if self.current_power <= self.current_threshold:
+            if self.current_power <= self.current_threshold * 0.8:  # 20% hysteresis
                 new_state = MachineState.OCCUPIED
 
         elif self.state == MachineState.OCCUPIED:

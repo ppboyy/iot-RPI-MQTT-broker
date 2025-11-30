@@ -121,6 +121,7 @@ class MachineMonitor:
                     self.door_open_start_time = time.time()
                 elif time.time() - self.door_open_start_time >= DOOR_OPEN_DURATION:
                     new_state = MachineState.IDLE
+                    self.door_is_open = True
                     self.door_open_start_time = None
                     cycle_completed = True
                     self.cycle_count += 1
@@ -263,8 +264,9 @@ def on_message(client, userdata, msg):
             monitor = monitor_manager.get_monitor(machine_id)
 
             if monitor:
-                door_state = int(msg.payload.decode())
-                monitor.update_door(door_state == 1)
+                door_state = msg.payload.decode().lower()
+                is_open = door_state in ['open', 'true', '1']
+                monitor.update_door(is_open)
 
                 state_changed, cycle_completed = monitor.check_transitions()
 

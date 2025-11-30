@@ -13,12 +13,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ---- AWS IoT Core Configuration ----
-MQTT_BROKER = "a5916n61elm51-ats.iot.ap-southeast-1.amazonaws.com"
-MQTT_PORT = 8883
+AWS_IOT_BROKER = "a5916n61elm51-ats.iot.ap-southeast-1.amazonaws.com"
+AWS_IOT_PORT = 8883
 
 CA_PATH = "/home/andrea/aws-iot/certs/AmazonRootCA1.pem"
 CERT_PATH = "/home/andrea/aws-iot/certs/device.pem.crt"
 KEY_PATH = "/home/andrea/aws-iot/certs/private.pem.key"
+
+# ---- Local MQTT Broker Configuration (for Shelly plugs) ----
+LOCAL_MQTT_BROKER = "localhost"  # or your broker IP
+LOCAL_MQTT_PORT = 1883
 
 # ---- Machine Configuration ----
 MACHINES = {
@@ -292,8 +296,40 @@ def on_publish(client, userdata, mid):
     """Callback for when a message is published"""
     logger.debug(f"📤 Message published, mid: {mid}")
 
+def on_connect_local(client, userdata, flags, rc):
+    """Callback for local MQTT broker connection"""
+    if rc == 0:
+        logger.info("✅ Connected to local MQTT broker!")
+        logger.info("Subscribing to Shelly plug topics:")
+        
+        for machine_id, config in MACHINES.items():
+            shelly_topic = config["shelly_topic"]
+            client.subscribe(shelly_topic, qos=1)
+            logger.info(f"  - {shelly_topic}")
+    else:
+        logger.error(f"❌ Failed to connect to local broker, return code {rc}")
+
+def on_message_local(client, userdata, msg):
+    """Callback for messages from local MQTT broker (Shelly plugs)"""
+    try:
+        for machine_id, config in MACHINES.items():
+            if msg.topic == config["shelly_topic"]:
+                monitor = monitor_manager.get_monitor(machine_id)
+                if monitor:
+                    data = json.loads(msg.payload.decode())
+                    power = data.get("apower", 0.0)
+                    monitor.update_power(power)
+                    logger.debug(f"{monitor.name}: Power = {power}W")
+                    state_changed, _ = monitor.check_transitions()
+                    if state_changed:
+                        logger.info(f"{monitor.name}: {monitor.state.value}")
+                break
+    except Exception as e:
+        logger.error(f"Error processing local message: {e}")
+        logger.debug(f"Topic: {msg.topic}, Payload: {msg.payload}")
+
 def main():
-    """Main function to start the AWS IoT Core MQTT client"""
+    """Main function to start the MQTT clients"""
     global monitor_manager
 
     logger.info("=" * 70)
@@ -305,24 +341,39 @@ def main():
     # Initialize monitor manager
     monitor_manager = MultiMachineMonitor(MACHINES)
 
-    # Create MQTT client for AWS IoT Core
-    client = mqtt.Client(client_id="raspi-washer-monitor")
-    client.on_connect = on_connect
-    client.on_disconnect = on_disconnect
-    client.on_message = on_message
-    client.on_publish = on_publish
+    # Create MQTT client for LOCAL broker (Shelly plugs)
+    local_client = mqtt.Client(client_id="raspi-washer-local")
+    local_client.on_connect = on_connect_local
+    local_client.on_message = on_message_local
+
+    # Create MQTT client for AWS IoT Core (publishing data)
+    aws_client = mqtt.Client(client_id="raspi-washer-aws")
+    aws_client.on_connect = on_connect
+    aws_client.on_disconnect = on_disconnect
+    aws_client.on_message = on_message
+    aws_client.on_publish = on_publish
+
+    # Connect to LOCAL MQTT broker (for Shelly plugs)
+    try:
+        logger.info(f"🌐 Connecting to local MQTT broker: {LOCAL_MQTT_BROKER}:{LOCAL_MQTT_PORT}")
+        local_client.connect(LOCAL_MQTT_BROKER, LOCAL_MQTT_PORT, keepalive=60)
+        local_client.loop_start()
+        logger.info("✅ Local broker connection initiated")
+    except Exception as e:
+        logger.error(f"❌ Failed to connect to local broker: {e}")
+        return
 
     # Configure TLS for AWS IoT Core
     try:
         logger.info("🔧 Configuring TLS for AWS IoT Core...")
-        client.tls_set(
+        aws_client.tls_set(
             ca_certs=CA_PATH,
             certfile=CERT_PATH,
             keyfile=KEY_PATH,
             cert_reqs=ssl.CERT_REQUIRED,
             tls_version=ssl.PROTOCOL_TLS
         )
-        client.tls_insecure_set(False)
+        aws_client.tls_insecure_set(False)
         logger.info("✅ TLS configured successfully")
     except Exception as e:
         logger.error(f"❌ Failed to configure TLS: {e}")
@@ -330,15 +381,13 @@ def main():
 
     # Connect to AWS IoT Core
     try:
-        logger.info(f"🌐 Connecting to AWS IoT Core: {MQTT_BROKER}:{MQTT_PORT}")
-        client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
-        logger.info("✅ Connection initiated")
+        logger.info(f"🌐 Connecting to AWS IoT Core: {AWS_IOT_BROKER}:{AWS_IOT_PORT}")
+        aws_client.connect(AWS_IOT_BROKER, AWS_IOT_PORT, keepalive=60)
+        aws_client.loop_start()
+        logger.info("✅ AWS IoT Core connection initiated")
     except Exception as e:
         logger.error(f"❌ Failed to connect to AWS IoT Core: {e}")
         return
-
-    # Start non-blocking network loop
-    client.loop_start()
 
     # Main monitoring loop
     logger.info("\n🔄 Monitoring started (Press Ctrl+C to exit)\n")
@@ -348,15 +397,17 @@ def main():
         while True:
             current_time = time.time()
             if current_time - last_publish_time >= PUBLISH_INTERVAL:
-                publish_machine_data(client)
+                publish_machine_data(aws_client)
                 last_publish_time = current_time
             time.sleep(1)
             
     except KeyboardInterrupt:
         logger.info("\n⏹️  Shutting down gracefully...")
         monitor_manager.save_cycle_counts()
-        client.loop_stop()
-        client.disconnect()
+        local_client.loop_stop()
+        local_client.disconnect()
+        aws_client.loop_stop()
+        aws_client.disconnect()
         logger.info("👋 Shutdown complete")
 
 if __name__ == "__main__":

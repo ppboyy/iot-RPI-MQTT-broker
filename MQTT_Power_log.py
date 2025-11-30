@@ -11,7 +11,7 @@ MQTT_BROKER = 'localhost'
 MQTT_PORT = 1883
 # Use the exact topic you provided.
 MQTT_TOPIC = "shellypluspluguk-3c8a1fec7d44/status/switch:0"
-CSV_FILE_PATH = "power_log_zen.csv"
+CSV_FILE_PATH = "power_log_gus.csv"
 # The JSON key containing the power value.
 POWER_KEY = "apower"
 # Time in seconds between attempts to reconnect to the MQTT broker.

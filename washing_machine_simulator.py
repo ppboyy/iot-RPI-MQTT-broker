@@ -9,8 +9,6 @@ import json
 import time
 import random
 import logging
-from datetime import datetime
-from enum import Enum
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -29,129 +27,46 @@ SIMULATED_MACHINES = {
 # Update frequency in seconds
 SENSOR_UPDATE_INTERVAL = 30  # How often to publish sensor data
 
-class SimulatedMachineState(Enum):
-    IDLE = "IDLE"
-    RUNNING = "RUNNING"
-    OCCUPIED = "OCCUPIED"
-
 class SimulatedMachine:
-    """Simulates a washing machine with realistic behavior based on real power data"""
+    """Generates random realistic power and door data with state-based rules"""
     
     def __init__(self, machine_id, name):
         self.machine_id = machine_id
         self.name = name
-        self.state = SimulatedMachineState.IDLE
-        self.door_open = True  # Start with door open in IDLE
-        self.power = 0.0
-        self.cycle_start_time = None
-        self.cycle_duration = 2760  # ~46 minutes (based on real data)
-        self.time_in_state = 0
-        
-    def update(self, delta_time):
-        """Update machine state based on realistic patterns"""
-        self.time_in_state += delta_time
-        
-        if self.state == SimulatedMachineState.IDLE:
-            # Small chance to start a cycle (2% per update)
-            if random.random() < 0.02:
-                self._start_cycle()
-            else:
-                self.power = random.uniform(6.0, 7.0)  # Standby power from real data
-                self.door_open = True
-        
-        elif self.state == SimulatedMachineState.RUNNING:
-            # Use realistic power pattern based on actual washing machine data
-            progress = self.time_in_state / self.cycle_duration
-            
-            if progress < 0.05:  # 0-2.3 min: Initial fill and start (6-82W)
-                self.power = random.uniform(6, 35) + random.uniform(-5, 20)
-                if random.random() < 0.1:  # Occasional spike
-                    self.power = random.uniform(60, 85)
-            
-            elif progress < 0.15:  # 2.3-6.9 min: Heating and initial agitation (30-110W)
-                base_power = 30 + (progress - 0.05) * 700
-                self.power = base_power + random.uniform(-10, 20)
-            
-            elif progress < 0.30:  # 6.9-13.8 min: Main wash cycle (90-230W)
-                base_power = random.uniform(90, 150)
-                self.power = base_power + random.uniform(-15, 80)
-                if random.random() < 0.15:  # Occasional high power moments
-                    self.power = random.uniform(180, 230)
-            
-            elif progress < 0.50:  # 13.8-23 min: Continued washing (80-200W)
-                base_power = random.uniform(80, 140)
-                self.power = base_power + random.uniform(-20, 60)
-            
-            elif progress < 0.70:  # 23-32.2 min: Rinse cycles (30-180W)
-                # Intermittent power with drain/fill cycles
-                if random.random() < 0.3:
-                    self.power = random.uniform(6, 10)  # Drain phase
-                else:
-                    self.power = random.uniform(30, 90) + random.uniform(-10, 90)
-            
-            elif progress < 0.95:  # 32.2-43.7 min: Final spin cycle (300-380W)
-                base_power = 330 + random.uniform(-20, 40)
-                self.power = base_power
-                # Simulate spin fluctuations
-                if random.random() < 0.2:
-                    self.power = random.uniform(300, 380)
-            
-            else:  # 43.7-46 min: Final drain and cooldown (6-60W)
-                if random.random() < 0.5:
-                    self.power = random.uniform(20, 40)
-                else:
-                    self.power = random.uniform(6, 10)
-            
-            # Ensure power doesn't go negative
-            self.power = max(6.0, self.power)
-            self.door_open = False  # Door locked during cycle
-            
-            # Check if cycle complete
-            if self.time_in_state >= self.cycle_duration:
-                self._complete_cycle()
-        
-        elif self.state == SimulatedMachineState.OCCUPIED:
-            self.power = random.uniform(6, 8)  # Standby power
-            
-            # Simulate someone opening door after some time
-            if self.time_in_state > random.uniform(30, 120):  # 30-120 seconds
-                self.door_open = True
-                
-                # If door open for >10 seconds, return to idle
-                if self.time_in_state > random.uniform(40, 130):
-                    self._return_to_idle()
-    
-    def _start_cycle(self):
-        """Start a washing cycle"""
-        self.state = SimulatedMachineState.RUNNING
-        # Add some variation to cycle duration (±5%)
-        self.cycle_duration = 2760 + random.uniform(-138, 138)  # ~44-48 minutes
-        self.time_in_state = 0
-        self.door_open = False
-        logger.info(f"🟢 {self.name} starting cycle (duration: {self.cycle_duration/60:.1f} min)")
-    
-    def _complete_cycle(self):
-        """Complete washing cycle"""
-        self.state = SimulatedMachineState.OCCUPIED
-        self.time_in_state = 0
-        logger.info(f"✅ {self.name} cycle complete, now OCCUPIED")
-    
-    def _return_to_idle(self):
-        """Return to idle state"""
-        self.state = SimulatedMachineState.IDLE
-        self.time_in_state = 0
-        self.door_open = False
-        logger.info(f"🔵 {self.name} returned to IDLE")
+        self.current_power = random.uniform(6, 8)  # Start at idle
+        self.previous_power = self.current_power
+        self.was_washing = False  # Track if machine was recently washing
+        self.just_finished = False  # Track if machine just finished a cycle
     
     def get_shelly_data(self):
-        """Generate Shelly plug data format"""
+        """Generate random Shelly plug data with realistic power patterns"""
+        # Store previous power to detect transitions
+        self.previous_power = self.current_power
+        
+        # Random power based on typical washing machine cycle
+        self.current_power = random.choice([
+            random.uniform(6, 8),      # Standby/Idle
+            random.uniform(20, 100),   # Washing/Filling
+            random.uniform(100, 250),  # Heating/Agitation
+            random.uniform(300, 380),  # Spinning
+        ])
+        
+        # Detect state transitions
+        if self.current_power > 20:
+            self.was_washing = True
+            self.just_finished = False
+        elif self.current_power <= 8 and self.was_washing:
+            # Transition from washing to idle - machine just finished
+            self.just_finished = True
+            self.was_washing = False
+        
         return {
             "id": 0,
             "source": "init",
-            "output": self.power > 5,
-            "apower": round(self.power, 2),
+            "output": self.current_power > 5,
+            "apower": round(self.current_power, 2),
             "voltage": round(random.uniform(230, 240), 1),
-            "current": round(self.power / 230, 3),
+            "current": round(self.current_power / 230, 3),
             "aenergy": {
                 "total": round(random.uniform(1000, 2000), 2),
                 "by_minute": [0.0, 0.0, 0.0]
@@ -163,8 +78,25 @@ class SimulatedMachine:
         }
     
     def get_hall_sensor_state(self):
-        """Generate hall sensor data (open/closed string format)"""
-        return "open" if self.door_open else "closed"
+        """Generate door state based on power consumption rules:
+        1. Idle (6-8W, never washed): Door is open
+        2. Washing (>20W): Door is always closed
+        3. Just finished (6-8W after being >20W): 80% chance closed, 20% chance open
+        """
+        if self.current_power > 20:
+            # Washing phase - door always closed
+            return "closed"
+        elif self.current_power <= 8 and self.just_finished:
+            # Just finished washing - 80% chance door still closed, 20% chance opened
+            if random.random() < 0.8:
+                return "closed"
+            else:
+                # User opened the door to collect laundry
+                self.just_finished = False  # Reset state after door is opened
+                return "open"
+        else:
+            # Idle/waiting to start - door is open
+            return "open"
 
 def on_connect(client, userdata, flags, rc):
     """Callback for when the client connects to local MQTT broker"""
@@ -199,7 +131,7 @@ def publish_sensor_data(client, machines):
         hall_state = machine.get_hall_sensor_state()
         client.publish(hall_topic, hall_state, qos=1)
         
-        logger.info(f"{machine.name}: State={machine.state.value}, Power={machine.power:.1f}W, Door={'OPEN' if machine.door_open else 'CLOSED'}")
+        logger.info(f"{machine.name}: Power={shelly_data['apower']}W, Door={hall_state}")
 
 def main():
     """Main simulator function"""
@@ -239,23 +171,12 @@ def main():
     
     # Main simulation loop
     logger.info("\n🔄 Simulation started (Press Ctrl+C to exit)\n")
-    last_update = time.time()
     
     try:
         while True:
-            current_time = time.time()
-            delta_time = current_time - last_update
-            
-            # Update all machines
-            for machine in machines.values():
-                machine.update(delta_time)
-            
-            # Publish sensor data
-            if delta_time >= SENSOR_UPDATE_INTERVAL:
-                publish_sensor_data(client, machines)
-                last_update = current_time
-            
-            time.sleep(1)
+            # Publish sensor data every interval
+            publish_sensor_data(client, machines)
+            time.sleep(SENSOR_UPDATE_INTERVAL)
             
     except KeyboardInterrupt:
         logger.info("\n⏹️  Shutting down simulator...")

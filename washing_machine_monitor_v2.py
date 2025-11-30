@@ -199,7 +199,7 @@ monitor_manager = None
 def publish_machine_data(client):
     """
     Publish machine data to AWS IoT Core in the format expected by the backend API.
-    Format matches the database schema: {timestamp, MachineID, cycle_number, current, state}
+    Format matches the database schema: {timestamp, MachineID, cycle_number, current, state, door_opened}
     """
     timestamp = datetime.now().isoformat()
 
@@ -222,7 +222,8 @@ def publish_machine_data(client):
             "MachineID": machine_id,
             "cycle_number": monitor.cycle_count,
             "current": round(average_power, 2),
-            "state": monitor.state.value
+            "state": monitor.state.value,
+            "door_opened": monitor.door_is_open
         }
 
         # Publish to AWS IoT Core topic

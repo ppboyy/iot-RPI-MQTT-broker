@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 Washing Machine Simulator - Simulates multiple washing machines for testing
-Publishes fake hall sensor and Shelly plug data to AWS IoT Core
+Publishes fake hall sensor and Shelly plug data to local MQTT broker
+The data is then picked up by washing_machine_monitor_v2.py and forwarded to AWS IoT Core
 """
 import paho.mqtt.client as mqtt
-import ssl
 import json
 import time
 import random
@@ -15,13 +15,9 @@ from enum import Enum
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ---- AWS IoT Core Configuration ----
-MQTT_BROKER = "a5916n61elm51-ats.iot.ap-southeast-1.amazonaws.com"
-MQTT_PORT = 8883
-
-CA_PATH = "/home/andrea/aws-iot/certs/AmazonRootCA1.pem"
-CERT_PATH = "/home/andrea/aws-iot/certs/device.pem.crt"
-KEY_PATH = "/home/andrea/aws-iot/certs/private.pem.key"
+# ---- Local MQTT Broker Configuration ----
+MQTT_BROKER = "localhost"
+MQTT_PORT = 1883
 
 # ---- Simulated Machines Configuration ----
 SIMULATED_MACHINES = {
@@ -171,9 +167,9 @@ class SimulatedMachine:
         return "open" if self.door_open else "closed"
 
 def on_connect(client, userdata, flags, rc):
-    """Callback for when the client connects to AWS IoT Core"""
+    """Callback for when the client connects to local MQTT broker"""
     if rc == 0:
-        logger.info("✅ Simulator connected to AWS IoT Core!")
+        logger.info("✅ Simulator connected to local MQTT broker!")
     else:
         logger.error(f"❌ Failed to connect, return code {rc}")
 
@@ -226,29 +222,13 @@ def main():
     client.on_disconnect = on_disconnect
     client.on_publish = on_publish
     
-    # Configure TLS for AWS IoT Core
+    # Connect to local MQTT broker
     try:
-        logger.info("🔧 Configuring TLS for AWS IoT Core...")
-        client.tls_set(
-            ca_certs=CA_PATH,
-            certfile=CERT_PATH,
-            keyfile=KEY_PATH,
-            cert_reqs=ssl.CERT_REQUIRED,
-            tls_version=ssl.PROTOCOL_TLS
-        )
-        client.tls_insecure_set(False)
-        logger.info("✅ TLS configured successfully")
-    except Exception as e:
-        logger.error(f"❌ Failed to configure TLS: {e}")
-        return
-    
-    # Connect to AWS IoT Core
-    try:
-        logger.info(f"🌐 Connecting to AWS IoT Core: {MQTT_BROKER}:{MQTT_PORT}")
+        logger.info(f"🌐 Connecting to local MQTT broker: {MQTT_BROKER}:{MQTT_PORT}")
         client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
         logger.info("✅ Connection initiated")
     except Exception as e:
-        logger.error(f"❌ Failed to connect to AWS IoT Core: {e}")
+        logger.error(f"❌ Failed to connect to local MQTT broker: {e}")
         return
     
     # Start network loop

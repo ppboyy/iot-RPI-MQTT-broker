@@ -206,7 +206,17 @@ def publish_machine_data(client):
     for machine_id, monitor in monitor_manager.monitors.items():
         average_power = monitor.calculate_and_reset_average()
         
-        # Create payload matching backend API format
+        # Check for state transitions BEFORE publishing
+        state_changed, cycle_completed = monitor.check_transitions()
+        
+        if state_changed:
+            logger.info(f"{monitor.name}: {monitor.state.value}")
+        
+        if cycle_completed:
+            monitor_manager.save_cycle_counts()
+            logger.info(f"✅ Cycle completed! Total cycles: {monitor.cycle_count}")
+        
+        # Create payload matching backend API format with UPDATED state
         payload = {
             "timestamp": timestamp,
             "MachineID": machine_id,

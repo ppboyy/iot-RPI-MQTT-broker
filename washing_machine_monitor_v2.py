@@ -26,13 +26,28 @@ MACHINES = {
         "name": "Washing Machine 1",
         "shelly_topic": "shellypluspluguk-3c8a1fec7d44/status/switch:0",
         "current_threshold": 8.0  # Watts
+    },
+    "WM-02": {
+        "name": "Washing Machine 2",
+        "shelly_topic": "simulator/WM-02/shelly",
+        "current_threshold": 8.0
+    },
+    "WM-03": {
+        "name": "Washing Machine 3",
+        "shelly_topic": "simulator/WM-03/shelly",
+        "current_threshold": 8.0
+    },
+    "WM-04": {
+        "name": "Washing Machine 4",
+        "shelly_topic": "simulator/WM-04/shelly",
+        "current_threshold": 8.0
     }
 }
 
 # ---- Constants ----
 DOOR_OPEN_DURATION = 10  # seconds
 CYCLE_COUNT_FILE = "machine_cycles.json"
-PUBLISH_INTERVAL = 60
+PUBLISH_INTERVAL = 30
 
 class MachineState(Enum):
     IDLE = "IDLE"

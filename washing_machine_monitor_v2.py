@@ -238,20 +238,6 @@ def on_connect(client, userdata, flags, rc):
     """Callback for when the client connects to AWS IoT Core"""
     if rc == 0:
         logger.info("✅ Connected to AWS IoT Core!")
-        logger.info("Subscribing to topics:")
-
-        # Subscribe to all hall sensors
-        for machine_id in MACHINES.keys():
-            hall_topic = f"{machine_id}/hall_sensor/state"
-            client.subscribe(hall_topic, qos=1)
-            logger.info(f"  - {hall_topic}")
-
-        # Subscribe to all Shelly plugs
-        for machine_id, config in MACHINES.items():
-            shelly_topic = config["shelly_topic"]
-            client.subscribe(shelly_topic, qos=1)
-            logger.info(f"  - {shelly_topic}")
-
         logger.info(f"Data will be published every {PUBLISH_INTERVAL} seconds")
     else:
         logger.error(f"❌ Failed to connect to AWS IoT Core, return code {rc}")
@@ -314,30 +300,59 @@ def on_connect_local(client, userdata, flags, rc):
     """Callback for local MQTT broker connection"""
     if rc == 0:
         logger.info("✅ Connected to local MQTT broker!")
-        logger.info("Subscribing to Shelly plug topics:")
+        logger.info("Subscribing to topics:")
         
+        # Subscribe to Shelly plug topics
         for machine_id, config in MACHINES.items():
             shelly_topic = config["shelly_topic"]
             client.subscribe(shelly_topic, qos=1)
             logger.info(f"  - {shelly_topic}")
+        
+        # Subscribe to hall sensor topics (from ESP32)
+        for machine_id in MACHINES.keys():
+            hall_topic = f"{machine_id}/hall_sensor/state"
+            client.subscribe(hall_topic, qos=1)
+            logger.info(f"  - {hall_topic}")
     else:
         logger.error(f"❌ Failed to connect to local broker, return code {rc}")
 
 def on_message_local(client, userdata, msg):
-    """Callback for messages from local MQTT broker (Shelly plugs)"""
+    """Callback for messages from local MQTT broker (Shelly plugs and ESP32 hall sensors)"""
     try:
-        for machine_id, config in MACHINES.items():
-            if msg.topic == config["shelly_topic"]:
-                monitor = monitor_manager.get_monitor(machine_id)
-                if monitor:
-                    data = json.loads(msg.payload.decode())
-                    power = data.get("apower", 0.0)
-                    monitor.update_power(power)
-                    logger.debug(f"{monitor.name}: Power = {power}W")
-                    state_changed, _ = monitor.check_transitions()
-                    if state_changed:
-                        logger.info(f"{monitor.name}: {monitor.state.value}")
-                break
+        # Check if it's a hall sensor message from ESP32
+        if "/hall_sensor/state" in msg.topic:
+            machine_id = msg.topic.split("/")[0]
+            monitor = monitor_manager.get_monitor(machine_id)
+
+            if monitor:
+                door_state = msg.payload.decode().lower()
+                is_open = door_state in ['open', 'true', '1']
+                monitor.update_door(is_open)
+                logger.info(f"{monitor.name}: Door {'OPEN' if is_open else 'CLOSED'}")
+
+                state_changed, cycle_completed = monitor.check_transitions()
+
+                if state_changed:
+                    logger.info(f"{monitor.name}: {monitor.state.value}")
+
+                if cycle_completed:
+                    monitor_manager.save_cycle_counts()
+                    logger.info(f"✅ Cycle completed! Total cycles: {monitor.cycle_count}")
+        
+        # Check if it's a Shelly plug message
+        else:
+            for machine_id, config in MACHINES.items():
+                if msg.topic == config["shelly_topic"]:
+                    monitor = monitor_manager.get_monitor(machine_id)
+                    if monitor:
+                        data = json.loads(msg.payload.decode())
+                        power = data.get("apower", 0.0)
+                        monitor.update_power(power)
+                        logger.debug(f"{monitor.name}: Power = {power}W")
+                        state_changed, _ = monitor.check_transitions()
+                        if state_changed:
+                            logger.info(f"{monitor.name}: {monitor.state.value}")
+                    break
     except Exception as e:
         logger.error(f"Error processing local message: {e}")
         logger.debug(f"Topic: {msg.topic}, Payload: {msg.payload}")

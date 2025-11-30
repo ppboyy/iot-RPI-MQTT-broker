@@ -39,16 +39,16 @@ class SimulatedMachineState(Enum):
     OCCUPIED = "OCCUPIED"
 
 class SimulatedMachine:
-    """Simulates a washing machine with realistic behavior"""
+    """Simulates a washing machine with realistic behavior based on real power data"""
     
     def __init__(self, machine_id, name):
         self.machine_id = machine_id
         self.name = name
         self.state = SimulatedMachineState.IDLE
-        self.door_open = False
+        self.door_open = True  # Start with door open in IDLE
         self.power = 0.0
         self.cycle_start_time = None
-        self.cycle_duration = 0
+        self.cycle_duration = 2760  # ~46 minutes (based on real data)
         self.time_in_state = 0
         
     def update(self, delta_time):
@@ -56,30 +56,58 @@ class SimulatedMachine:
         self.time_in_state += delta_time
         
         if self.state == SimulatedMachineState.IDLE:
-            # 10% chance per update to start a cycle
+            # Small chance to start a cycle (2% per update)
             if random.random() < 0.02:
                 self._start_cycle()
             else:
-                self.power = random.uniform(0, 2)  # Standby power
-                self.door_open = random.choice([True, False])
+                self.power = random.uniform(6.0, 7.0)  # Standby power from real data
+                self.door_open = True
         
         elif self.state == SimulatedMachineState.RUNNING:
-            # Simulate washing cycle power patterns
+            # Use realistic power pattern based on actual washing machine data
             progress = self.time_in_state / self.cycle_duration
             
-            if progress < 0.2:  # Initial fill/agitate
-                self.power = random.uniform(300, 500)
-            elif progress < 0.5:  # Main wash
-                self.power = random.uniform(150, 300)
-            elif progress < 0.7:  # Spin cycle
-                self.power = random.uniform(400, 600)
-            elif progress < 0.9:  # Rinse
-                self.power = random.uniform(100, 250)
-            else:  # Final spin
-                self.power = random.uniform(500, 700)
+            if progress < 0.05:  # 0-2.3 min: Initial fill and start (6-82W)
+                self.power = random.uniform(6, 35) + random.uniform(-5, 20)
+                if random.random() < 0.1:  # Occasional spike
+                    self.power = random.uniform(60, 85)
             
-            # Add some noise
-            self.power += random.uniform(-20, 20)
+            elif progress < 0.15:  # 2.3-6.9 min: Heating and initial agitation (30-110W)
+                base_power = 30 + (progress - 0.05) * 700
+                self.power = base_power + random.uniform(-10, 20)
+            
+            elif progress < 0.30:  # 6.9-13.8 min: Main wash cycle (90-230W)
+                base_power = random.uniform(90, 150)
+                self.power = base_power + random.uniform(-15, 80)
+                if random.random() < 0.15:  # Occasional high power moments
+                    self.power = random.uniform(180, 230)
+            
+            elif progress < 0.50:  # 13.8-23 min: Continued washing (80-200W)
+                base_power = random.uniform(80, 140)
+                self.power = base_power + random.uniform(-20, 60)
+            
+            elif progress < 0.70:  # 23-32.2 min: Rinse cycles (30-180W)
+                # Intermittent power with drain/fill cycles
+                if random.random() < 0.3:
+                    self.power = random.uniform(6, 10)  # Drain phase
+                else:
+                    self.power = random.uniform(30, 90) + random.uniform(-10, 90)
+            
+            elif progress < 0.95:  # 32.2-43.7 min: Final spin cycle (300-380W)
+                base_power = 330 + random.uniform(-20, 40)
+                self.power = base_power
+                # Simulate spin fluctuations
+                if random.random() < 0.2:
+                    self.power = random.uniform(300, 380)
+            
+            else:  # 43.7-46 min: Final drain and cooldown (6-60W)
+                if random.random() < 0.5:
+                    self.power = random.uniform(20, 40)
+                else:
+                    self.power = random.uniform(6, 10)
+            
+            # Ensure power doesn't go negative
+            self.power = max(6.0, self.power)
             self.door_open = False  # Door locked during cycle
             
             # Check if cycle complete
@@ -87,7 +115,7 @@ class SimulatedMachine:
                 self._complete_cycle()
         
         elif self.state == SimulatedMachineState.OCCUPIED:
-            self.power = random.uniform(0, 3)  # Very low power
+            self.power = random.uniform(6, 8)  # Standby power
             
             # Simulate someone opening door after some time
             if self.time_in_state > random.uniform(30, 120):  # 30-120 seconds
@@ -100,10 +128,11 @@ class SimulatedMachine:
     def _start_cycle(self):
         """Start a washing cycle"""
         self.state = SimulatedMachineState.RUNNING
-        self.cycle_duration = random.uniform(180, 300)  # 3-5 minutes for testing
+        # Add some variation to cycle duration (±5%)
+        self.cycle_duration = 2760 + random.uniform(-138, 138)  # ~44-48 minutes
         self.time_in_state = 0
         self.door_open = False
-        logger.info(f"🟢 {self.name} starting cycle (duration: {self.cycle_duration:.0f}s)")
+        logger.info(f"🟢 {self.name} starting cycle (duration: {self.cycle_duration/60:.1f} min)")
     
     def _complete_cycle(self):
         """Complete washing cycle"""
@@ -138,8 +167,8 @@ class SimulatedMachine:
         }
     
     def get_hall_sensor_state(self):
-        """Generate hall sensor data (0=closed, 1=open)"""
-        return 1 if self.door_open else 0
+        """Generate hall sensor data (open/closed string format)"""
+        return "open" if self.door_open else "closed"
 
 def on_connect(client, userdata, flags, rc):
     """Callback for when the client connects to AWS IoT Core"""
@@ -172,7 +201,7 @@ def publish_sensor_data(client, machines):
         # Publish hall sensor data (door state)
         hall_topic = f"{machine_id}/hall_sensor/state"
         hall_state = machine.get_hall_sensor_state()
-        client.publish(hall_topic, str(hall_state), qos=1)
+        client.publish(hall_topic, hall_state, qos=1)
         
         logger.info(f"{machine.name}: State={machine.state.value}, Power={machine.power:.1f}W, Door={'OPEN' if machine.door_open else 'CLOSED'}")
 

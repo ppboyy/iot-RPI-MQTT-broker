@@ -73,7 +73,7 @@ class MachineMonitor:
         self.power_readings_sum = 0.0
         self.power_readings_count = 0
 
-        self.door_is_open = False
+        self.door_is_open = True  # Door starts open in IDLE state
         self.door_open_start_time = None
         self.cycle_count = 0
         self.last_state_change = datetime.now()

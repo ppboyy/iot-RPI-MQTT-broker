@@ -109,6 +109,7 @@ class MachineMonitor:
         if self.state == MachineState.IDLE:
             if self.current_power > self.current_threshold * 1.2:  # 20% hysteresis
                 new_state = MachineState.RUNNING
+                self.door_is_open = False
                 self.door_open_start_time = None
 
         elif self.state == MachineState.RUNNING:

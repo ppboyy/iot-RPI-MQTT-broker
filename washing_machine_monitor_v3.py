@@ -131,7 +131,8 @@ class MachineMonitor:
         if self.ml_detector:
             try:
                 phase, confidence = self.ml_detector.predict_phase()
-                if phase:
+                # Only return prediction if we have valid confidence (not the fallback "IDLE" with 0.0)
+                if phase and confidence > 0.0:
                     self.ml_phase = phase
                     self.ml_confidence = confidence
                     return phase, confidence

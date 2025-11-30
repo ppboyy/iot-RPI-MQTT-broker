@@ -133,6 +133,11 @@ class MachineMonitor:
                 phase, confidence = self.ml_detector.predict_phase()
                 # Only return prediction if we have valid confidence (not the fallback "IDLE" with 0.0)
                 if phase and confidence > 0.0:
+                    # Override ML prediction if current power is too low (machine is actually idle)
+                    if self.current_power < self.current_threshold:
+                        # Machine is idle, ignore historical ML predictions
+                        return None, 0.0
+                    
                     self.ml_phase = phase
                     self.ml_confidence = confidence
                     return phase, confidence

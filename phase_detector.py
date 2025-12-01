@@ -18,7 +18,7 @@ class MLPhaseDetector:
         
         # Buffers for feature extraction
         self.power_buffer = deque(maxlen=120)  # Store 2 hours of history
-        self.window_size = 12  # Must match training window size
+        self.window_size = 18  # Increased to match training (was 12, now 18)
         
     def add_power_reading(self, power):
         """Add new power reading"""
@@ -44,6 +44,7 @@ class MLPhaseDetector:
             # Rolling statistics
             window_data = power_smooth[max(0, i-3):i+1]
             
+            # Basic features (11 features)
             feat = [
                 power_smooth[i],                          # power_smooth
                 np.mean(window_data[-2:]) if len(window_data) >= 2 else power_smooth[i],  # power_avg_30s
@@ -57,6 +58,34 @@ class MLPhaseDetector:
                 len(window_data),                         # time_in_range
                 (np.max(window_data) - np.min(window_data)) / (np.mean(window_data) + 1e-6) if len(window_data) > 1 else 0  # power_oscillation
             ]
+            
+            # NEW FEATURES for better WASHING detection (5 features)
+            # Peak count
+            if len(window_data) >= 3:
+                peaks = sum((window_data[1:-1] > window_data[:-2]) & (window_data[1:-1] > window_data[2:]))
+            else:
+                peaks = 0
+            
+            # Regularity score
+            if len(window_data) > 1:
+                regularity = 1.0 / (1.0 + np.std(np.diff(window_data)))
+            else:
+                regularity = 0
+            
+            # High power ratio
+            high_power_ratio = sum(window_data > 200) / len(window_data) if len(window_data) > 0 else 0
+            
+            # Power stability
+            if len(window_data) > 1:
+                stability = 1.0 - (np.std(np.diff(window_data)) / (np.mean(window_data) + 1e-6))
+            else:
+                stability = 0
+            
+            # Mean absolute deviation
+            power_mad = np.mean(np.abs(window_data - np.mean(window_data))) if len(window_data) > 0 else 0
+            
+            feat.extend([peaks, regularity, high_power_ratio, stability, power_mad])
+            
             features.extend(feat)
         
         return np.array(features).reshape(1, -1)

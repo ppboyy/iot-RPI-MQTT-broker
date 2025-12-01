@@ -18,7 +18,7 @@ class MLPhaseDetector:
         
         # Buffers for feature extraction
         self.power_buffer = deque(maxlen=120)  # Store 2 hours of history
-        self.window_size = 18  # Increased to match training (was 12, now 18)
+        self.window_size = 12  # Must match training window size (currently trained with 12)
         
     def add_power_reading(self, power):
         """Add new power reading"""

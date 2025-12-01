@@ -75,10 +75,10 @@ class SimulatedMachine:
         return {
             "id": 0,
             "source": "init",
-            "output": self.current_power > 5,
-            "apower": round(self.current_power, 2),
+            "output": bool(self.current_power > 5),  # Convert to native Python bool
+            "apower": float(round(self.current_power, 2)),  # Convert to native Python float
             "voltage": round(random.uniform(230, 240), 1),
-            "current": round(self.current_power / 230, 3),
+            "current": round(float(self.current_power) / 230, 3),
             "aenergy": {
                 "total": round(random.uniform(1000, 2000), 2),
                 "by_minute": [0.0, 0.0, 0.0]

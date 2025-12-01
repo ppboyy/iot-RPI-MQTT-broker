@@ -1,0 +1,17 @@
+[Unit]
+Description=Washing Machine Simulator
+After=network.target mosquitto.service washing-machine-monitor.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=andrea
+WorkingDirectory=/home/andrea/iot-broker
+ExecStart=/usr/bin/python3 washing_machine_simulator.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

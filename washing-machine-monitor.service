@@ -1,0 +1,17 @@
+[Unit]
+Description=Washing Machine Monitor with ML Phase Detection
+After=network.target mosquitto.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=andrea
+WorkingDirectory=/home/andrea/iot-broker
+ExecStart=/usr/bin/python3 washing_machine_monitor_v3.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Washing Machine Simulator - Simulates multiple washing machines for testing
-Publishes fake hall sensor and Shelly plug data to local MQTT broker
+Replays actual power data from power_log_gus.csv for realistic simulation
+Publishes Shelly plug data to local MQTT broker
 The data is then picked up by washing_machine_monitor_v2.py and forwarded to AWS IoT Core
 """
 import paho.mqtt.client as mqtt
@@ -9,6 +10,8 @@ import json
 import time
 import random
 import logging
+import pandas as pd
+import os
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -17,39 +20,48 @@ logger = logging.getLogger(__name__)
 MQTT_BROKER = "localhost"
 MQTT_PORT = 1883
 
+# ---- Power Log File ----
+POWER_LOG_FILE = "power_log_gus.csv"
+
 # ---- Simulated Machines Configuration ----
 SIMULATED_MACHINES = {
-    "WM-02": {"name": "Washing Machine 2"},
-    "WM-03": {"name": "Washing Machine 3"},
-    "WM-04": {"name": "Washing Machine 4"},
+    "WM-02": {"name": "Washing Machine 2", "offset": 0},      # Start at beginning
+    "WM-03": {"name": "Washing Machine 3", "offset": 600},    # Start 10 minutes ahead
+    "WM-04": {"name": "Washing Machine 4", "offset": 1200},   # Start 20 minutes ahead
 }
 
 # Update frequency in seconds
-SENSOR_UPDATE_INTERVAL = 30  # How often to publish sensor data
+SENSOR_UPDATE_INTERVAL = 10  # Match the ~10 second intervals in power_log_gus.csv
 
 class SimulatedMachine:
-    """Generates random realistic power and door data with state-based rules"""
+    """Replays power data from CSV file with realistic state tracking"""
     
-    def __init__(self, machine_id, name):
+    def __init__(self, machine_id, name, power_data, offset=0):
         self.machine_id = machine_id
         self.name = name
-        self.current_power = random.uniform(6, 8)  # Start at idle
+        self.power_data = power_data
+        self.current_index = offset % len(power_data)  # Start position with offset
+        self.current_power = power_data.iloc[self.current_index]['power_w']
         self.previous_power = self.current_power
         self.was_washing = False  # Track if machine was recently washing
         self.just_finished = False  # Track if machine just finished a cycle
     
+    def get_next_power(self):
+        """Get next power reading from CSV data"""
+        power = self.power_data.iloc[self.current_index]['power_w']
+        
+        # Move to next sample (loop back to start when finished)
+        self.current_index = (self.current_index + 1) % len(self.power_data)
+        
+        return power
+    
     def get_shelly_data(self):
-        """Generate random Shelly plug data with realistic power patterns"""
+        """Generate Shelly plug data using real power readings from CSV"""
         # Store previous power to detect transitions
         self.previous_power = self.current_power
         
-        # Random power based on typical washing machine cycle
-        self.current_power = random.choice([
-            random.uniform(6, 8),      # Standby/Idle
-            random.uniform(20, 100),   # Washing/Filling
-            random.uniform(100, 250),  # Heating/Agitation
-            random.uniform(300, 380),  # Spinning
-        ])
+        # Get next power reading from CSV
+        self.current_power = self.get_next_power()
         
         # Detect state transitions
         if self.current_power > 20:
@@ -138,14 +150,30 @@ def main():
     logger.info("=" * 70)
     logger.info(f"Washing Machine Simulator - Simulating {len(SIMULATED_MACHINES)} machines")
     
-    # Initialize simulated machines
+    # Load power data from CSV
+    if not os.path.exists(POWER_LOG_FILE):
+        logger.error(f"❌ Power log file not found: {POWER_LOG_FILE}")
+        logger.error(f"   Please ensure {POWER_LOG_FILE} is in the current directory")
+        return
+    
+    logger.info(f"📂 Loading power data from {POWER_LOG_FILE}")
+    power_data = pd.read_csv(POWER_LOG_FILE)
+    logger.info(f"✅ Loaded {len(power_data)} power samples (~{len(power_data)*10/60:.1f} minutes of data)")
+    
+    # Initialize simulated machines with power data
     machines = {
-        machine_id: SimulatedMachine(machine_id, config["name"])
+        machine_id: SimulatedMachine(
+            machine_id, 
+            config["name"], 
+            power_data,
+            config["offset"]
+        )
         for machine_id, config in SIMULATED_MACHINES.items()
     }
     
     for machine_id, machine in machines.items():
-        logger.info(f"  - {machine.name} (ID: {machine_id})")
+        offset_min = SIMULATED_MACHINES[machine_id]["offset"] // 60
+        logger.info(f"  - {machine.name} (ID: {machine_id}, offset: {offset_min} min)")
     logger.info("=" * 70)
     
     # Create MQTT client

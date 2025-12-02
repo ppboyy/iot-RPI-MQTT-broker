@@ -117,6 +117,7 @@ class MachineMonitor:
                 # Return True if power is abnormally high (trigger immediate publish)
                 return power > 800
         return False
+                
 
     def calculate_and_reset_average(self):
         with self.power_lock:
@@ -388,7 +389,13 @@ def on_message(client, userdata, msg):
                     if monitor:
                         data = json.loads(msg.payload.decode())
                         power = data.get("apower", 0.0)
-                        monitor.update_power(power)
+                        high_power = monitor.update_power(power)
+                        
+                        # Trigger immediate publish if high power detected
+                        if high_power:
+                            logger.warning(f"⚠️ HIGH POWER DETECTED: {monitor.name} = {power}W - Publishing immediately!")
+                            publish_single_machine(client, monitor)
+                        
                         state_changed, _ = monitor.check_transitions()
                         if state_changed:
                             logger.info(f"{monitor.name}: {monitor.state.value}")

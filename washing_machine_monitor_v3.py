@@ -113,6 +113,10 @@ class MachineMonitor:
                 # Add power reading to ML detector
                 if self.ml_detector:
                     self.ml_detector.add_power_reading(power)
+                
+                # Return True if power is abnormally high (trigger immediate publish)
+                return power > 800
+        return False
 
     def calculate_and_reset_average(self):
         with self.power_lock:
@@ -252,6 +256,49 @@ class MultiMachineMonitor:
 
 # Global monitor manager
 monitor_manager = None
+
+def publish_single_machine(client, monitor):
+    """
+    Publish single machine data immediately (for high power alerts).
+    """
+    timestamp = datetime.now().isoformat()
+    machine_id = monitor.machine_id
+    
+    # Use current power without resetting average
+    current_power = monitor.current_power
+    
+    # Get ML phase prediction
+    ml_phase, ml_confidence = monitor.predict_ml_phase()
+    
+    # Check for state transitions
+    state_changed, cycle_completed = monitor.check_transitions()
+    
+    if state_changed:
+        logger.info(f"{monitor.name}: {monitor.state.value}")
+    
+    if cycle_completed:
+        monitor_manager.save_cycle_counts()
+        logger.info(f"✅ Cycle completed! Total cycles: {monitor.cycle_count}")
+    
+    # Create payload
+    payload = {
+        "timestamp": timestamp,
+        "MachineID": machine_id,
+        "cycle_number": monitor.cycle_count,
+        "current": round(current_power, 2),
+        "state": monitor.state.value,
+        "door_opened": monitor.door_is_open
+    }
+    
+    # Add ML predictions if available
+    if ml_phase:
+        payload["ml_phase"] = ml_phase
+        payload["ml_confidence"] = round(ml_confidence, 3)
+    
+    # Publish to AWS IoT Core topic
+    topic = f"washer/{machine_id}/data"
+    client.publish(topic, json.dumps(payload), qos=1)
+    logger.info(f"🚨 IMMEDIATE ALERT Published to {topic}: {payload}")
 
 def publish_machine_data(client):
     """
@@ -416,8 +463,17 @@ def on_message_local(client, userdata, msg):
                     if monitor:
                         data = json.loads(msg.payload.decode())
                         power = data.get("apower", 0.0)
-                        monitor.update_power(power)
+                        high_power = monitor.update_power(power)
                         logger.debug(f"{monitor.name}: Power = {power}W")
+                        
+                        # Trigger immediate publish if high power detected
+                        if high_power:
+                            logger.warning(f"⚠️ HIGH POWER DETECTED: {monitor.name} = {power}W - Publishing immediately!")
+                            # Get the AWS client from userdata
+                            aws_client = userdata.get('aws_client')
+                            if aws_client:
+                                publish_single_machine(aws_client, monitor)
+                        
                         state_changed, _ = monitor.check_transitions()
                         if state_changed:
                             logger.info(f"{monitor.name}: {monitor.state.value}")
@@ -450,6 +506,9 @@ def main():
     aws_client.on_disconnect = on_disconnect
     aws_client.on_message = on_message
     aws_client.on_publish = on_publish
+    
+    # Store aws_client in local_client userdata for immediate publishing
+    local_client.user_data_set({'aws_client': aws_client})
 
     # Connect to LOCAL MQTT broker (for Shelly plugs)
     try:

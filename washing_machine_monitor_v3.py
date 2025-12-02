@@ -258,15 +258,15 @@ class MultiMachineMonitor:
 # Global monitor manager
 monitor_manager = None
 
-def publish_single_machine(client, monitor):
+def publish_single_machine(client, monitor, actual_power):
     """
     Publish single machine data immediately (for high power alerts).
     """
     timestamp = datetime.now().isoformat()
     machine_id = monitor.machine_id
     
-    # Use current power without resetting average
-    current_power = monitor.current_power
+    # Use actual power reading that triggered the alert
+    current_power = actual_power
     
     # Get ML phase prediction
     ml_phase, ml_confidence = monitor.predict_ml_phase()
@@ -394,7 +394,7 @@ def on_message(client, userdata, msg):
                         # Trigger immediate publish if high power detected
                         if high_power:
                             logger.warning(f"⚠️ HIGH POWER DETECTED: {monitor.name} = {power}W - Publishing immediately!")
-                            publish_single_machine(client, monitor)
+                            publish_single_machine(client, monitor, power)
                         
                         state_changed, _ = monitor.check_transitions()
                         if state_changed:
@@ -479,7 +479,7 @@ def on_message_local(client, userdata, msg):
                             # Get the AWS client from userdata
                             aws_client = userdata.get('aws_client')
                             if aws_client:
-                                publish_single_machine(aws_client, monitor)
+                                publish_single_machine(aws_client, monitor, power)
                         
                         state_changed, _ = monitor.check_transitions()
                         if state_changed:
